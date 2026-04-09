@@ -1,0 +1,89 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+#define PIR_PIN 2
+#define HALFHOURS_TRACKED 8
+#define HALFHOUR_MS 1600000UL  // 1 HALFHOUR in milliseconds
+
+int HALFHOURlyCount[HALFHOURS_TRACKED] = {0};  // stores past HALFHOURs
+int currentCount = 0;                  // motion events this HALFHOUR
+unsigned long HALFHOURStart = 0;
+
+void setup() {
+  pinMode(PIR_PIN, INPUT);
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+  HALFHOURStart = millis();
+}
+
+void loop() {
+  // Detect motion (PIR goes HIGH on detection)
+  if (digitalRead(PIR_PIN) == HIGH) {
+    currentCount++;
+    delay(1000);  // debounce - wait 1s before counting again
+  }
+
+  // Check if an HALFHOUR has passed
+  if (millis() - HALFHOURStart >= HALFHOUR_MS) {
+    // Shift old HALFHOURs along the array
+    for (int i = HALFHOURS_TRACKED - 1; i > 0; i--) {
+      HALFHOURlyCount[i] = HALFHOURlyCount[i - 1];
+    }
+    HALFHOURlyCount[0] = currentCount;  // save this HALFHOUR
+    currentCount = 0;
+    HALFHOURStart = millis();
+  }
+
+  drawGraph();
+  delay(500);
+}
+
+void drawGraph() {
+  display.clearDisplay();
+
+  // Title
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print("Motion/30min  Now:");
+  display.print(currentCount);
+
+  // Graph area: x from 0-127, y from 10-63
+  int graphTop = 10;
+  int graphBottom = 63;
+  int graphHeight = graphBottom - graphTop;
+
+  // Find max value for scaling
+  int maxVal = currentCount;
+  for (int i = 0; i < HALFHOURS_TRACKED; i++) {
+    if (HALFHOURlyCount[i] > maxVal) maxVal = HALFHOURlyCount[i];
+  }
+  if (maxVal == 0) maxVal = 1;  // avoid divide by zero
+
+  // Draw bars - 8 past HALFHOURs + 1 current = 9 bars
+  int totalBars = HALFHOURS_TRACKED + 1;
+  int barWidth = SCREEN_WIDTH / totalBars - 1;
+
+  // Draw past HALFHOURs (oldest on left)
+  for (int i = 0; i < HALFHOURS_TRACKED; i++) {
+    int barHeight = map(HALFHOURlyCount[HALFHOURS_TRACKED - 1 - i], 0, maxVal, 0, graphHeight);
+    int x = i * (barWidth + 1);
+    int y = graphBottom - barHeight;
+    display.fillRect(x, y, barWidth, barHeight, SSD1306_WHITE);
+  }
+
+  // Draw current HALFHOUR bar (rightmost, slightly brighter outline)
+  int barHeight = map(currentCount, 0, maxVal, 0, graphHeight);
+  int x = HALFHOURS_TRACKED * (barWidth + 1);
+  int y = graphBottom - barHeight;
+  display.fillRect(x, y, barWidth, barHeight, SSD1306_WHITE);
+  display.drawRect(x - 1, graphTop, barWidth + 2, graphHeight, SSD1306_WHITE); // highlight outline
+
+  display.display();
+}
